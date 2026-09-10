@@ -1,4 +1,28 @@
 # TabularMark
+
+This fork contains a server-verified reproduction of all numbered experiments
+in the CCS 2024 paper. Start with:
+
+- [`REPRODUCTION_REPORT.md`](REPRODUCTION_REPORT.md): Chinese final report,
+  paper/result comparison, new findings, and conclusions.
+- [`REPRODUCTION.md`](REPRODUCTION.md): environment, protocol substitutions,
+  and execution commands.
+- [`reproduce.py`](reproduce.py): unified deterministic runner.
+- [`outputs/`](outputs/): CSV tables, PNG figures, and run metadata from
+  `hustserver65`.
+
+The complete suite runs inside the `tabularmark-repro` Docker container with:
+
+```bash
+.conda-env/bin/python reproduce.py --stage all --xgb-device gpu
+```
+
+The latest complete dual-A100 run took 130.99 seconds. Table 12, Table 15, and
+Table 27 use explicitly labelled reconstructed protocols because the upstream
+artifact does not publish enough information to execute the original protocols.
+
+## Upstream description
+
 This repository implements experiments for TabularMark. The idea is to perturb a small proportion of cells in a tabular dataset to embed watermarks.
 
 ## Dataset
@@ -14,4 +38,3 @@ python script1.py
 ```
 
 There are also some experimental codes in Jupyter Notebook scripts. You can run each cell according to the annotations to obtain the results.
-
