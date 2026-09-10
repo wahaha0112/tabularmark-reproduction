@@ -574,12 +574,13 @@ def main() -> None:
         "platform": platform.platform(),
     }
 
-    table2, artifacts = table2_detectability(data)
-    save_table("table2_detectability", table2)
-    table3, table4 = non_intrusiveness(data, artifacts)
-    save_table("table3_forest_f1", table3)
-    save_table("table4_more_datasets", table4)
-    save_table("figure6_roc_data", roc_experiment(data))
+    if args.stage in {"core", "all"}:
+        table2, artifacts = table2_detectability(data)
+        save_table("table2_detectability", table2)
+        table3, table4 = non_intrusiveness(data, artifacts)
+        save_table("table3_forest_f1", table3)
+        save_table("table4_more_datasets", table4)
+        save_table("figure6_roc_data", roc_experiment(data))
 
     if args.stage in {"robustness", "all"}:
         for name, frame in robustness(data).items():
@@ -590,7 +591,8 @@ def main() -> None:
             save_table(name, frame)
 
     metadata["elapsed_seconds"] = time.time() - started
-    (OUTPUT / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    metadata_path = OUTPUT / f"run_metadata_{args.stage}.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(f"\nCompleted in {metadata['elapsed_seconds']:.1f} seconds", flush=True)
 
 
