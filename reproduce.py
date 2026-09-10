@@ -645,12 +645,48 @@ def tradeoffs(data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     p_results = tradeoff_grid(synthetic, [10.0, 20.0, 30.0, 40.0, 50.0], "p")
     n_results = tradeoff_grid(synthetic, [100, 200, 300, 400, 500], "n")
     gamma_results = tradeoff_grid(synthetic, [0.25, 0.33, 0.5, 0.67, 0.75], "gamma")
+
+    def baseline_table(values: list[float | int], mode: str) -> pd.DataFrame:
+        rows = []
+        original_accuracy = logistic_accuracy(synthetic, synthetic)
+        for value_index, value in enumerate(values):
+            count = int(value) if mode == "n" else 300
+            bound = float(value) if mode == "p" else (30.0 if mode == "gamma" else 40.0)
+            gamma = float(value) if mode == "gamma" else 0.5
+            marked, keys = embed_continuous(
+                synthetic,
+                "dimension_0",
+                count,
+                bound,
+                500,
+                SEED + value_index,
+                gamma,
+            )
+            record = {
+                "value": value,
+                "Do Accuracy": original_accuracy,
+                "Dw Accuracy": logistic_accuracy(synthetic, marked),
+            }
+            if mode == "gamma":
+                detector = continuous_detector(
+                    synthetic, "dimension_0", keys, bound, 500, gamma
+                )
+                record["Do Z-score"] = detector(synthetic)
+            rows.append(record)
+        return pd.DataFrame(rows)
+
+    table19 = baseline_table([10.0, 20.0, 30.0, 40.0, 50.0], "p")
+    table21 = baseline_table([100, 200, 300, 400, 500], "n")
+    table23_24 = baseline_table([0.25, 0.33, 0.5, 0.67, 0.75], "gamma")
     plot_tradeoff(p_results, "figure8_p_tradeoff.png", "p")
     plot_tradeoff(n_results, "figure9_n_tradeoff.png", "n")
     plot_tradeoff(gamma_results, "figure10_gamma_tradeoff.png", "gamma")
     return {
+        "table19_p_baseline_accuracy": table19,
         "table20_p_tradeoff": p_results,
+        "table21_n_baseline_accuracy": table21,
         "table22_n_tradeoff": n_results,
+        "tables23_24_gamma_baselines": table23_24,
         "figure10_gamma_data": gamma_results,
     }
 
@@ -664,7 +700,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--stage",
-        choices=["core", "robustness", "tradeoffs", "all"],
+        choices=[
+            "core",
+            "robustness",
+            "extended",
+            "comparison",
+            "tradeoffs",
+            "discussion",
+            "all",
+        ],
         default="all",
     )
     parser.add_argument(
@@ -702,8 +746,26 @@ def main() -> None:
         for name, frame in robustness(data, xgb_device).items():
             save_table(name, frame)
 
+    if args.stage in {"extended", "all"}:
+        from extended_experiments import run_extended
+
+        for name, frame in run_extended(data).items():
+            save_table(name, frame)
+
+    if args.stage in {"comparison", "all"}:
+        from comparison_experiment import run_comparison
+
+        for name, frame in run_comparison(xgb_device).items():
+            save_table(name, frame)
+
     if args.stage in {"tradeoffs", "all"}:
         for name, frame in tradeoffs(data).items():
+            save_table(name, frame)
+
+    if args.stage in {"discussion", "all"}:
+        from discussion_experiments import run_discussion
+
+        for name, frame in run_discussion(data).items():
             save_table(name, frame)
 
     metadata["elapsed_seconds"] = time.time() - started
