@@ -13,6 +13,7 @@ import json
 import math
 import platform
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -265,17 +266,32 @@ def table2_detectability(data: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, d
     return pd.DataFrame(rows), artifacts
 
 
-def forest_f1(original: pd.DataFrame, training_data: pd.DataFrame) -> np.ndarray:
+def forest_f1(
+    original: pd.DataFrame,
+    training_data: pd.DataFrame,
+    xgb_device: str,
+    gpu_id: int = 0,
+) -> np.ndarray:
     labels = LabelEncoder().fit(original["Cover_Type"])
     indices = np.arange(len(original))
     train_indices, test_indices = train_test_split(indices, test_size=0.3, random_state=42)
+    model_parameters: dict[str, object] = {
+        "n_estimators": 30,
+        "max_depth": 10,
+        "n_jobs": 8,
+        "random_state": 42,
+        "verbosity": 0,
+    }
+    if xgb_device == "gpu":
+        model_parameters.update(
+            tree_method="gpu_hist",
+            predictor="gpu_predictor",
+            gpu_id=gpu_id,
+        )
+    else:
+        model_parameters["tree_method"] = "hist"
     model = XGBClassifier(
-        n_estimators=30,
-        max_depth=10,
-        n_jobs=16,
-        random_state=42,
-        tree_method="hist",
-        verbosity=0,
+        **model_parameters,
     )
     model.fit(
         training_data.drop(columns=["Cover_Type"]).iloc[train_indices],
@@ -287,12 +303,21 @@ def forest_f1(original: pd.DataFrame, training_data: pd.DataFrame) -> np.ndarray
 
 
 def non_intrusiveness(
-    data: dict[str, pd.DataFrame], detectability_artifacts: dict[str, object]
+    data: dict[str, pd.DataFrame],
+    detectability_artifacts: dict[str, object],
+    xgb_device: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     forest = data["forest"]
     forest_marked = detectability_artifacts["Forest"]["marked"]
-    f1_original = forest_f1(forest, forest)
-    f1_marked = forest_f1(forest, forest_marked)
+    if xgb_device == "gpu":
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            original_future = executor.submit(forest_f1, forest, forest, xgb_device, 0)
+            marked_future = executor.submit(forest_f1, forest, forest_marked, xgb_device, 1)
+            f1_original = original_future.result()
+            f1_marked = marked_future.result()
+    else:
+        f1_original = forest_f1(forest, forest, xgb_device)
+        f1_marked = forest_f1(forest, forest_marked, xgb_device)
     table3 = pd.DataFrame(
         [
             {"Dataset": "Do", "Category 2": f1_original[1], "Category 4": f1_original[3], "Category 6": f1_original[5]},
@@ -361,14 +386,14 @@ def matched_categorical_z(
     return z_score(green_count, matched, 0.5), matched
 
 
-def robustness(data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+def robustness(data: dict[str, pd.DataFrame], xgb_device: str) -> dict[str, pd.DataFrame]:
     forest = data["forest"]
     categories = np.sort(forest["Cover_Type"].unique())
     marked, keys = embed_categorical(forest, "Cover_Type", 300, SEED)
     proportions = [0.2, 0.4, 0.6, 0.8, 1.0]
 
     alteration_z = []
-    alteration_f1 = []
+    attacked_datasets = []
     for position, proportion in enumerate(proportions):
         attacked = randomize_categorical(
             marked, "Cover_Type", categories, proportion, seed=12138 + position
@@ -379,7 +404,20 @@ def robustness(data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
                 "Z-score": detect_categorical(attacked, "Cover_Type", keys, categories),
             }
         )
-        f1 = forest_f1(forest, attacked)
+        attacked_datasets.append(attacked)
+
+    if xgb_device == "gpu":
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(forest_f1, forest, attacked, xgb_device, index % 2)
+                for index, attacked in enumerate(attacked_datasets)
+            ]
+            f1_results = [future.result() for future in futures]
+    else:
+        f1_results = [forest_f1(forest, attacked, xgb_device) for attacked in attacked_datasets]
+
+    alteration_f1 = []
+    for proportion, f1 in zip(proportions, f1_results):
         alteration_f1.append(
             {
                 "Alteration (%)": int(proportion * 100),
@@ -562,28 +600,39 @@ def main() -> None:
         choices=["core", "robustness", "tradeoffs", "all"],
         default="all",
     )
+    parser.add_argument(
+        "--xgb-device",
+        choices=["auto", "cpu", "gpu"],
+        default="auto",
+        help="XGBoost execution device; auto uses CUDA when /dev/nvidia0 is present.",
+    )
     args = parser.parse_args()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     started = time.time()
     data = load_datasets()
+
+    xgb_device = args.xgb_device
+    if xgb_device == "auto":
+        xgb_device = "gpu" if Path("/dev/nvidia0").exists() else "cpu"
 
     metadata = {
         "stage": args.stage,
         "seed": SEED,
         "python": platform.python_version(),
         "platform": platform.platform(),
+        "xgb_device": xgb_device,
     }
 
     if args.stage in {"core", "all"}:
         table2, artifacts = table2_detectability(data)
         save_table("table2_detectability", table2)
-        table3, table4 = non_intrusiveness(data, artifacts)
+        table3, table4 = non_intrusiveness(data, artifacts, xgb_device)
         save_table("table3_forest_f1", table3)
         save_table("table4_more_datasets", table4)
         save_table("figure6_roc_data", roc_experiment(data))
 
     if args.stage in {"robustness", "all"}:
-        for name, frame in robustness(data).items():
+        for name, frame in robustness(data, xgb_device).items():
             save_table(name, frame)
 
     if args.stage in {"tradeoffs", "all"}:
