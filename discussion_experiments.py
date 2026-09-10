@@ -138,10 +138,17 @@ def table27_shapley(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         housing.loc[validation_rows, feature_columns].to_numpy(float),
         housing.loc[validation_rows, "MEDV"].to_numpy(float),
     )
-    ranked_training_positions = np.argsort(values)
+    # The paper calls these the "smallest" values.  We use the smallest
+    # magnitudes: points whose estimated marginal contribution is closest to
+    # zero are the least consequential to perturb.  This also avoids treating a
+    # noisy negative estimate as a highly disposable sample.
+    ranked_training_positions = np.argsort(np.abs(values))
     selected_rows = train_rows[ranked_training_positions[:50]]
-    random_marked, _ = core.embed_continuous(
-        housing, "MEDV", 50, 25.0, 500, core.SEED
+    random_rows = np.random.RandomState(core.SEED + 2701).choice(
+        train_rows, size=50, replace=False
+    )
+    random_marked = embed_selected_rows(
+        housing, random_rows, "MEDV", 25.0, 500
     )
     shapley_marked = embed_selected_rows(
         housing, selected_rows, "MEDV", 25.0, 500
@@ -161,38 +168,42 @@ def signature(row: pd.Series, columns: list[str]) -> tuple[float, ...]:
     return tuple(float(row[column]) for column in columns)
 
 
-def naive_lookup(
+def naive_match_all(
+    original: pd.DataFrame,
     suspicious: pd.DataFrame,
-    wanted: list[tuple[float, ...]],
     key_columns: list[str],
-) -> list[float | None]:
-    haystack = suspicious[key_columns].to_numpy(float)
-    targets = suspicious["MEDV"].to_numpy(float)
-    found: list[float | None] = []
-    for key in wanted:
-        result = None
-        for row_index, values in enumerate(haystack):
-            if tuple(values) == key:
-                result = float(targets[row_index])
+) -> dict[int, float]:
+    """Paper Algorithm 3: match every suspicious tuple row by row."""
+
+    original_signatures = [
+        signature(row, key_columns) for _, row in original.iterrows()
+    ]
+    found: dict[int, float] = {}
+    for _, row in suspicious.iterrows():
+        candidate = signature(row, key_columns)
+        for original_index, expected in enumerate(original_signatures):
+            if candidate == expected:
+                found.setdefault(original_index, float(row["MEDV"]))
                 break
-        found.append(result)
     return found
 
 
-def binary_lookup(
+def binary_match_all(
+    original: pd.DataFrame,
     suspicious: pd.DataFrame,
-    wanted: list[tuple[float, ...]],
     key_columns: list[str],
-) -> list[float | None]:
+) -> dict[int, float]:
     pairs = sorted(
-        (signature(row, key_columns), float(row["MEDV"]))
-        for _, row in suspicious.iterrows()
+        (signature(row, key_columns), int(index))
+        for index, row in original.iterrows()
     )
     signatures = [pair[0] for pair in pairs]
-    found: list[float | None] = []
-    for key in wanted:
-        position = bisect.bisect_left(signatures, key)
-        found.append(pairs[position][1] if position < len(pairs) and signatures[position] == key else None)
+    found: dict[int, float] = {}
+    for _, row in suspicious.iterrows():
+        candidate = signature(row, key_columns)
+        position = bisect.bisect_left(signatures, candidate)
+        if position < len(pairs) and signatures[position] == candidate:
+            found.setdefault(pairs[position][1], float(row["MEDV"]))
     return found
 
 
@@ -223,7 +234,6 @@ def figure11_matching(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         housing, "MEDV", 50, 25.0, 500, core.SEED
     )
     key_columns = [column for column in housing.columns if column != "MEDV"][:3]
-    wanted = [signature(housing.loc[key.row], key_columns) for key in keys]
     rng = np.random.RandomState(core.SEED + 1100)
     rows = []
     for proportion in [0.2, 0.4, 0.6, 0.8, 1.0]:
@@ -236,11 +246,13 @@ def figure11_matching(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         ).reset_index(drop=True)
 
         started = time.perf_counter()
-        naive_values = naive_lookup(suspicious, wanted, key_columns)
+        naive_matches = naive_match_all(housing, suspicious, key_columns)
         naive_time = time.perf_counter() - started
         started = time.perf_counter()
-        binary_values = binary_lookup(suspicious, wanted, key_columns)
+        binary_matches = binary_match_all(housing, suspicious, key_columns)
         binary_time = time.perf_counter() - started
+        naive_values = [naive_matches.get(key.row) for key in keys]
+        binary_values = [binary_matches.get(key.row) for key in keys]
         rows.append(
             {
                 "Insertion (%)": int(proportion * 100),
