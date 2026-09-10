@@ -1,0 +1,5 @@
+Dataset,Protocol,AUC,Paper AUC
+Synthetic,paper_neighborhood,0.847725,0.930000
+Synthetic,balanced_through_100pct,0.699950,
+Boston Housing,paper_neighborhood,0.913538,0.940000
+Boston Housing,balanced_through_100pct,0.682350,

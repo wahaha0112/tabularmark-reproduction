@@ -1,0 +1,8 @@
+{
+  "stage": "core",
+  "seed": 10000,
+  "python": "3.10.21",
+  "platform": "Linux-6.11.0-17-generic-x86_64-with-glibc2.31",
+  "xgb_device": "gpu",
+  "elapsed_seconds": 17.555572509765625
+}

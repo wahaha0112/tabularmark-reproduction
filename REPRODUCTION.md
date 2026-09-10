@@ -15,10 +15,14 @@ This repository tracks a reproducible rerun of the experiments in
 - Each meaningful experiment iteration is committed and pushed before the
   next iteration starts.
 
-## Planned coverage
+## Completed coverage
 
 1. Detectability and false-positive behavior (Table 2 and Figure 6).
-2. Non-intrusiveness on classification and regression tasks (Tables 3-5).
+2. Non-intrusiveness on classification and regression tasks (Tables 3-4).
 3. Robustness to alteration, insertion, and deletion attacks (Tables 6-11).
-4. Hyperparameter trade-offs (Figures 8-10 and Table 22).
-5. A machine-readable comparison between reproduced and reported results.
+4. Hyperparameter trade-offs (Figures 8-10 and Tables 20 and 22).
+5. Paper/artifact/reproduction comparison in `REPRODUCTION_REPORT.md`.
+
+The Zoo, Adult, and Hospital experiments are not included because their data
+are not present in the author-provided archive. Comparison baselines that need
+external implementations are also outside the self-contained artifact scope.
