@@ -10,4 +10,4 @@ __pycache__/
 # Author-provided datasets and generated experiment artifacts.
 datasets.zip
 datasets/
-outputs/
+outputs/*.log
