@@ -471,27 +471,94 @@ def robustness(data: dict[str, pd.DataFrame], xgb_device: str) -> dict[str, pd.D
 
 def roc_experiment(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     specifications = [
-        ("Synthetic", data["synthetic"], "dimension_0", 300, 40.0, 500),
-        ("Boston Housing", data["housing"], "MEDV", 50, 25.0, 500),
+        ("Synthetic", data["synthetic"], None, "dimension_0", 300, 40.0, 500, 0.93),
+        ("Boston Housing", data["housing"], "split", "MEDV", 50, 25.0, 500, 0.94),
     ]
     figure, axes = plt.subplots(1, 2, figsize=(10, 4.2))
     result_rows = []
-    proportions = [0.2, 0.4, 0.6, 0.8, 1.0]
-    for axis, (name, original, column, count, bound, bins) in zip(axes, specifications):
+    paper_schedule = [0.2, 0.4, 0.6, 0.8]
+    stress_schedule = [0.2, 0.4, 0.6, 0.8, 1.0]
+    for axis, (name, complete, split_mode, column, count, bound, bins, paper_auc) in zip(
+        axes, specifications
+    ):
+        if split_mode == "split":
+            split_rng = np.random.RandomState(SEED)
+            order = split_rng.permutation(len(complete))
+            midpoint = len(order) // 2
+            original = complete.iloc[order[:midpoint]].reset_index(drop=True)
+            neighboring = complete.iloc[order[midpoint : midpoint * 2]].reset_index(drop=True)
+        else:
+            original = complete
+            neighboring = None
+
         marked, keys = embed_continuous(original, column, count, bound, bins, SEED)
         detect = continuous_detector(original, column, keys, bound, bins)
-        scores = []
-        labels = []
+
+        paper_scores = []
+        paper_labels = []
+        for repetition in range(200):
+            proportion = paper_schedule[repetition % len(paper_schedule)]
+            attacked = randomize_continuous(
+                marked, column, bound, proportion, SEED + 100 + repetition
+            )
+            paper_scores.append(detect(attacked))
+            paper_labels.append(1)
+
         for repetition in range(100):
-            proportion = proportions[repetition % len(proportions)]
-            scores.append(detect(randomize_continuous(marked, column, bound, proportion, SEED + repetition)))
-            labels.append(1)
-            scores.append(detect(randomize_continuous(original, column, bound, proportion, SEED + 1000 + repetition)))
-            labels.append(0)
-        fpr, tpr, _ = roc_curve(labels, scores)
+            proportion = paper_schedule[repetition % len(paper_schedule)]
+            attacked = randomize_continuous(
+                original, column, bound, proportion, SEED + 1000 + repetition
+            )
+            paper_scores.append(detect(attacked))
+            paper_labels.append(0)
+
+        for repetition in range(100):
+            if neighboring is None:
+                independent = original.copy()
+                rng = np.random.RandomState(SEED + 2000 + repetition)
+                independent[column] = rng.normal(
+                    original[column].mean(), original[column].std(ddof=0), len(original)
+                )
+            else:
+                proportion = paper_schedule[repetition % len(paper_schedule)]
+                independent = randomize_continuous(
+                    neighboring, column, bound, proportion, SEED + 2000 + repetition
+                )
+            paper_scores.append(detect(independent))
+            paper_labels.append(0)
+
+        fpr, tpr, _ = roc_curve(paper_labels, paper_scores)
         area = auc(fpr, tpr)
-        result_rows.append({"Dataset": name, "AUC": area})
-        axis.plot(fpr, tpr, linewidth=2.2, label=f"AUC = {area:.3f}")
+        result_rows.append(
+            {"Dataset": name, "Protocol": "paper_neighborhood", "AUC": area, "Paper AUC": paper_auc}
+        )
+
+        stress_scores = []
+        stress_labels = []
+        for repetition in range(100):
+            proportion = stress_schedule[repetition % len(stress_schedule)]
+            stress_scores.append(
+                detect(randomize_continuous(marked, column, bound, proportion, SEED + 3000 + repetition))
+            )
+            stress_labels.append(1)
+            stress_scores.append(
+                detect(randomize_continuous(original, column, bound, proportion, SEED + 4000 + repetition))
+            )
+            stress_labels.append(0)
+        stress_fpr, stress_tpr, _ = roc_curve(stress_labels, stress_scores)
+        stress_area = auc(stress_fpr, stress_tpr)
+        result_rows.append(
+            {"Dataset": name, "Protocol": "balanced_through_100pct", "AUC": stress_area, "Paper AUC": np.nan}
+        )
+
+        axis.plot(fpr, tpr, linewidth=2.2, label=f"Paper protocol AUC = {area:.3f}")
+        axis.plot(
+            stress_fpr,
+            stress_tpr,
+            linewidth=1.6,
+            linestyle=":",
+            label=f"100% stress AUC = {stress_area:.3f}",
+        )
         axis.plot([0, 1], [0, 1], linestyle="--", color="0.5")
         axis.set_title(name)
         axis.set_xlabel("False Positive Rate")
