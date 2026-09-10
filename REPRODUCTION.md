@@ -6,8 +6,10 @@ This repository tracks a reproducible rerun of the experiments in
 ## Execution policy
 
 - Code and reports are maintained locally and committed to GitHub.
-- Computational experiments run on `hustserver65` under
-  `/data/d2023-fsy/tabularmark-reproduction`.
+- Computational experiments run in the dedicated `tabularmark-repro` Docker
+  container on `hustserver65`. The host project path is
+  `/data/d2023-fsy/tabularmark-reproduction`, mounted at
+  `/workspace/tabularmark-reproduction` in the container.
 - The author-provided dataset archive is transferred directly to the server
   and is not committed to GitHub.
 - Each meaningful experiment iteration is committed and pushed before the
@@ -20,4 +22,3 @@ This repository tracks a reproducible rerun of the experiments in
 3. Robustness to alteration, insertion, and deletion attacks (Tables 6-11).
 4. Hyperparameter trade-offs (Figures 8-10 and Table 22).
 5. A machine-readable comparison between reproduced and reported results.
-

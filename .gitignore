@@ -1,6 +1,7 @@
 .DS_Store
 __MACOSX/
 .venv/
+.conda-env/
 .pytest_cache/
 __pycache__/
 *.py[cod]
@@ -10,4 +11,3 @@ __pycache__/
 datasets.zip
 datasets/
 outputs/
-
